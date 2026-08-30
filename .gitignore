@@ -13,3 +13,6 @@
 .externalNativeBuild
 .cxx
 local.properties
+/test-media/
+*.jks
+keystore.properties
