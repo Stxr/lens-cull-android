@@ -16,4 +16,4 @@
 - [x] Add storage scanning, EXIF parsing, RAW preview extraction and XMP rating persistence.
 - [x] Add adaptive tablet UI, filters, zoom preview, EXIF overlay and backup/restore.
 - [x] Pass unit tests, lint, debug build and API 33/API 36 device tests.
-- [ ] Create and push private GitHub repository.
+- [x] Create and push private GitHub repository.
