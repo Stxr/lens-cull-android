@@ -39,6 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import com.github.panpf.zoomimage.CoilZoomAsyncImage
+import com.github.panpf.zoomimage.rememberCoilZoomState
 import com.stxr.lenscull.domain.CullFlag
 import com.stxr.lenscull.domain.PhotoAsset
 import com.stxr.lenscull.domain.RatingSyncState
@@ -134,11 +136,43 @@ fun PhotoPreviewPanel(
     Box(Modifier.weight(1f).fillMaxWidth()) {
       when {
         preview == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
-        preview!!.isSuccess -> CoilZoomAsyncImage(
-          model = preview!!.getOrNull(),
-          contentDescription = photo.displayName,
-          modifier = Modifier.fillMaxSize().then(holdModifier),
-        )
+        preview!!.isSuccess -> key(photo.id) {
+          val zoomState = rememberCoilZoomState()
+          val swipeModifier = Modifier.pointerInput(photo.id, zoomState) {
+            awaitEachGesture {
+              val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+              val startedAtBaseScale = zoomState.zoomable.userTransform.scaleX <= BASE_SCALE_TOLERANCE
+              var lastPosition = down.position
+              var multiplePointers = false
+              do {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                multiplePointers = multiplePointers || event.changes.count { it.pressed } > 1
+                val pointer = event.changes.firstOrNull { it.id == down.id }
+                if (pointer != null) lastPosition = pointer.position
+              } while (pointer?.pressed == true)
+
+              when (
+                detectPhotoSwipe(
+                  deltaX = lastPosition.x - down.position.x,
+                  deltaY = lastPosition.y - down.position.y,
+                  viewportWidthPx = size.width.toFloat(),
+                  touchSlopPx = viewConfiguration.touchSlop,
+                  enabled = startedAtBaseScale && !multiplePointers,
+                )
+              ) {
+                PhotoSwipeDirection.PREVIOUS -> onPrevious()
+                PhotoSwipeDirection.NEXT -> onNext()
+                null -> Unit
+              }
+            }
+          }
+          CoilZoomAsyncImage(
+            model = preview!!.getOrNull(),
+            contentDescription = photo.displayName,
+            modifier = Modifier.fillMaxSize().then(holdModifier).then(swipeModifier),
+            zoomState = zoomState,
+          )
+        }
         else -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
           Icon(Icons.Rounded.Close, null, Modifier.size(44.dp), tint = Color(0xFFFF8A80))
           Text(preview!!.exceptionOrNull()?.message ?: "无法预览", color = Color.White, modifier = Modifier.padding(12.dp))
