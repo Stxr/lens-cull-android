@@ -2,6 +2,7 @@ package com.stxr.lenscull.ui
 
 import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -104,14 +105,28 @@ class PhotoPreviewGestureTest {
       ratingSyncState = RatingSyncState.LOCAL_ONLY, previewState = PreviewState.READY,
       previewError = null, exif = ExifSummary(),
     )
+    val nextPhoto = photo.copy(id = "test:next", displayName = "fullscreen-next.jpg")
+    val displayedPhoto = mutableStateOf(photo)
     var previousCount = 0
     var nextCount = 0
     var selectedRating = -1
     composeRule.setContent {
       MaterialTheme {
         PhotoPreviewPanel(
-          photo, { Result.success(image) }, { selectedRating = it }, {}, {}, null,
-          { previousCount++ }, { nextCount++ },
+          displayedPhoto.value, { Result.success(image) }, { selectedRating = it }, {}, {}, null,
+          {
+            previousCount++
+            displayedPhoto.value = photo
+          },
+          {
+            nextCount++
+            displayedPhoto.value = nextPhoto
+          },
+          fullscreenPhotos = listOf(photo, nextPhoto),
+          onFullscreenSelect = { selected ->
+            if (selected.id == nextPhoto.id) nextCount++ else previousCount++
+            displayedPhoto.value = selected
+          },
         )
       }
     }
@@ -126,7 +141,9 @@ class PhotoPreviewGestureTest {
     fullscreen.performTouchInput { click() }
     composeRule.onAllNodesWithText("再次点击照片可隐藏评分菜单").assertCountEquals(0)
     fullscreen.performTouchInput { swipeLeft() }
-    fullscreen.performTouchInput { swipeRight() }
+    composeRule.onNodeWithContentDescription("全屏 ${nextPhoto.displayName}").assertIsDisplayed()
+    composeRule.onNodeWithContentDescription("全屏 ${nextPhoto.displayName}").performTouchInput { swipeRight() }
+    composeRule.onNodeWithContentDescription("全屏 ${photo.displayName}").assertIsDisplayed()
     composeRule.runOnIdle {
       assertEquals(1, nextCount)
       assertEquals(1, previousCount)

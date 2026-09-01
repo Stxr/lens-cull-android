@@ -75,6 +75,8 @@ fun PhotoPreviewPanel(
   onBack: (() -> Unit)?,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
+  fullscreenPhotos: List<PhotoAsset> = listOfNotNull(photo),
+  onFullscreenSelect: ((PhotoAsset) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
   if (photo == null) {
@@ -218,10 +220,18 @@ fun PhotoPreviewPanel(
   if (showFullscreen) {
     FullscreenPhotoViewer(
       photo = photo,
+      photos = fullscreenPhotos,
       previewFile = previewFile,
       onRating = onRating,
-      onPrevious = onPrevious,
-      onNext = onNext,
+      onSelect = { selected ->
+        if (onFullscreenSelect != null) {
+          onFullscreenSelect(selected)
+        } else {
+          val currentIndex = fullscreenPhotos.indexOfFirst { it.id == photo.id }
+          val selectedIndex = fullscreenPhotos.indexOfFirst { it.id == selected.id }
+          if (selectedIndex < currentIndex) onPrevious() else if (selectedIndex > currentIndex) onNext()
+        }
+      },
       onDismiss = { showFullscreen = false },
     )
   }

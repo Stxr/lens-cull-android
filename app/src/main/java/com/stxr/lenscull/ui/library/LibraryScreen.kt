@@ -242,6 +242,8 @@ fun LibraryScreen(viewModel: LibraryViewModel, modifier: Modifier = Modifier) {
               androidx.compose.material3.VerticalDivider()
               PhotoPreviewPanel(
                 photo = selected,
+                fullscreenPhotos = photos.itemSnapshotList.items,
+                onFullscreenSelect = viewModel::select,
                 previewFile = viewModel::previewFile,
                 onRating = viewModel::setRating,
                 onFlag = viewModel::setFlag,
@@ -257,6 +259,8 @@ fun LibraryScreen(viewModel: LibraryViewModel, modifier: Modifier = Modifier) {
           } else {
             PhotoPreviewPanel(
               photo = selected,
+              fullscreenPhotos = photos.itemSnapshotList.items,
+              onFullscreenSelect = viewModel::select,
               previewFile = viewModel::previewFile,
               onRating = viewModel::setRating,
               onFlag = viewModel::setFlag,
