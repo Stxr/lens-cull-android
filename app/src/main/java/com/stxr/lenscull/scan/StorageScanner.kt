@@ -5,6 +5,7 @@ import android.os.Environment
 import android.os.storage.StorageManager
 import com.stxr.lenscull.data.db.PhotoDao
 import com.stxr.lenscull.data.db.PhotoEntity
+import com.stxr.lenscull.data.db.ProjectPhotoEntity
 import com.stxr.lenscull.domain.PreviewState
 import com.stxr.lenscull.domain.RatingSyncState
 import com.stxr.lenscull.metadata.ExifMetadataReader
@@ -25,14 +26,19 @@ class StorageScanner(
   private val photoDao: PhotoDao,
   private val metadataReader: ExifMetadataReader,
 ) {
-  suspend fun scan(onProgress: suspend (ScanProgress) -> Unit): ScanResult {
+  suspend fun scan(projectId: String, sourcePath: String?, onProgress: suspend (ScanProgress) -> Unit): ScanResult {
     check(Environment.isExternalStorageManager()) { "需要授予管理所有文件权限" }
     val generation = UUID.randomUUID().toString()
-    val roots = storageRoots()
+    val roots = sourcePath?.let { path ->
+      val directory = File(path)
+      check(directory.isDirectory && directory.canRead()) { "无法读取项目目录：$path" }
+      listOf(directory to volumeName(directory))
+    } ?: storageRoots()
     var scanned = 0
     var indexed = 0
     var failures = 0
     val batch = mutableListOf<PhotoEntity>()
+    val projectBatch = mutableListOf<ProjectPhotoEntity>()
     try {
       roots.forEach { root ->
         walk(root) { file, volumeName ->
@@ -103,16 +109,22 @@ class StorageScanner(
             )
           }
           batch += entity
+          projectBatch += ProjectPhotoEntity(projectId, id, generation)
           indexed += 1
           if (batch.size >= BATCH_SIZE) {
             photoDao.upsertAll(batch.toList())
+            photoDao.upsertProjectPhotos(projectBatch.toList())
             batch.clear()
+            projectBatch.clear()
             onProgress(ScanProgress(scanned, indexed, failures))
           }
         }
       }
-      if (batch.isNotEmpty()) photoDao.upsertAll(batch)
-      photoDao.deleteNotSeen(generation)
+      if (batch.isNotEmpty()) {
+        photoDao.upsertAll(batch)
+        photoDao.upsertProjectPhotos(projectBatch)
+      }
+      photoDao.deleteProjectPhotosNotSeen(projectId, generation)
       onProgress(ScanProgress(scanned, indexed, failures))
       return ScanResult(indexed, failures)
     } catch (cancelled: CancellationException) {
@@ -126,6 +138,12 @@ class StorageScanner(
       volume.directory?.takeIf(File::canRead)?.let { it to (volume.uuid ?: "primary") }
     }
     return volumes.distinctBy { runCatching { it.first.canonicalPath }.getOrDefault(it.first.absolutePath) }
+  }
+
+  private fun volumeName(file: File): String {
+    val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+    return storageRoots().firstOrNull { (root, _) -> path.startsWith(root.absolutePath.trimEnd('/') + "/") || path == root.absolutePath }?.second
+      ?: "selected"
   }
 
   private suspend fun walk(root: Pair<File, String>, onFile: suspend (File, String) -> Unit) {

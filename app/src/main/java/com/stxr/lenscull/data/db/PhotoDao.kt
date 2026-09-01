@@ -13,7 +13,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface PhotoDao {
-  @RawQuery(observedEntities = [PhotoEntity::class])
+  @RawQuery(observedEntities = [PhotoEntity::class, ProjectPhotoEntity::class])
   fun pagingSource(query: SupportSQLiteQuery): PagingSource<Int, PhotoEntity>
 
   @Query("SELECT * FROM photos WHERE id = :id LIMIT 1")
@@ -27,6 +27,9 @@ interface PhotoDao {
 
   @Upsert
   suspend fun upsertAll(photos: List<PhotoEntity>)
+
+  @Upsert
+  suspend fun upsertProjectPhotos(photos: List<ProjectPhotoEntity>)
 
   @Query("UPDATE photos SET rating = :rating, ratingSyncState = :syncState WHERE id = :id")
   suspend fun updateRating(id: String, rating: Int, syncState: RatingSyncState)
@@ -43,11 +46,20 @@ interface PhotoDao {
   @Query("DELETE FROM photos WHERE scanGeneration != :scanGeneration")
   suspend fun deleteNotSeen(scanGeneration: String): Int
 
+  @Query("DELETE FROM project_photos WHERE projectId = :projectId AND scanGeneration != :scanGeneration")
+  suspend fun deleteProjectPhotosNotSeen(projectId: String, scanGeneration: String): Int
+
   @Query("SELECT COUNT(*) FROM photos")
   fun observeCount(): Flow<Int>
 
+  @Query("SELECT COUNT(*) FROM project_photos WHERE projectId = :projectId")
+  fun observeCount(projectId: String): Flow<Int>
+
   @Query("SELECT DISTINCT parentPath FROM photos ORDER BY parentPath")
   fun observeFolders(): Flow<List<String>>
+
+  @Query("SELECT DISTINCT photos.parentPath FROM photos INNER JOIN project_photos ON photos.id = project_photos.photoId WHERE project_photos.projectId = :projectId ORDER BY photos.parentPath")
+  fun observeFolders(projectId: String): Flow<List<String>>
 
   @Query("SELECT * FROM photos ORDER BY canonicalPath")
   suspend fun allForBackup(): List<PhotoEntity>

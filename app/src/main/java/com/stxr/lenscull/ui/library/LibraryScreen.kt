@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.FolderOpen
@@ -62,6 +63,7 @@ import androidx.core.net.toUri
 import androidx.paging.compose.collectAsLazyPagingItems
 import com.stxr.lenscull.domain.CullFlag
 import com.stxr.lenscull.domain.PhotoAsset
+import com.stxr.lenscull.domain.ProjectSourceType
 import com.stxr.lenscull.domain.ScanState
 import com.stxr.lenscull.ui.components.FilterBar
 import com.stxr.lenscull.ui.components.PhotoGrid
@@ -71,6 +73,28 @@ import com.stxr.lenscull.ui.components.PhotoPreviewPanel
 @Composable
 fun LibraryScreen(viewModel: LibraryViewModel, modifier: Modifier = Modifier) {
   val context = LocalContext.current
+  val projects by viewModel.projects.collectAsState()
+  val activeProject by viewModel.activeProject.collectAsState()
+
+  if (activeProject == null) {
+    ProjectHomeScreen(
+      projects = projects,
+      onCreate = viewModel::createProject,
+      onOpen = viewModel::openProject,
+      onDelete = viewModel::deleteProject,
+    )
+    return
+  }
+  if (activeProject!!.sourceType == ProjectSourceType.UNCONFIGURED) {
+    ProjectSetupScreen(
+      project = activeProject!!,
+      onBack = viewModel::closeProject,
+      onAllStorage = viewModel::configureAllStorage,
+      onDirectory = viewModel::configureDirectory,
+    )
+    return
+  }
+
   val photos = viewModel.photos.collectAsLazyPagingItems()
   val selected by viewModel.selectedPhoto.collectAsState()
   val filter by viewModel.filter.collectAsState()
@@ -121,6 +145,9 @@ fun LibraryScreen(viewModel: LibraryViewModel, modifier: Modifier = Modifier) {
   }
 
   LaunchedEffect(Unit) { focusRequester.requestFocus() }
+  LaunchedEffect(activeProject!!.id, activeProject!!.sourceType, activeProject!!.sourcePath, count) {
+    if (count == 0 && Environment.isExternalStorageManager()) viewModel.startScan()
+  }
   LaunchedEffect(message) {
     message?.let { snackbar.showSnackbar(it); viewModel.clearMessage() }
   }
@@ -152,8 +179,8 @@ fun LibraryScreen(viewModel: LibraryViewModel, modifier: Modifier = Modifier) {
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         title = {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Rounded.PhotoLibrary, null)
-            Text(" LensCull", style = MaterialTheme.typography.titleLarge)
+            IconButton(onClick = viewModel::closeProject) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回项目") }
+            Text(activeProject!!.name, style = MaterialTheme.typography.titleLarge)
             Text("  $count 张", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
           }
         },

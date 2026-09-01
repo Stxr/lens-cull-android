@@ -22,14 +22,16 @@ class PhotoCatalogRepository(
   private val metadataWriter: MetadataWriter,
   private val previewExtractor: RawPreviewExtractor,
 ) {
-  fun photos(filter: LibraryFilter): Flow<PagingData<PhotoAsset>> =
+  fun photos(projectId: String, filter: LibraryFilter): Flow<PagingData<PhotoAsset>> =
     Pager(PagingConfig(pageSize = 60, prefetchDistance = 20, enablePlaceholders = false)) {
-      photoDao.pagingSource(LibraryQueryBuilder.build(filter))
+      photoDao.pagingSource(LibraryQueryBuilder.build(projectId, filter))
     }.flow.map { paging -> paging.map { it.toDomain() } }
 
   fun observePhoto(id: String): Flow<PhotoAsset?> = photoDao.observeById(id).map { it?.toDomain() }
   fun observeCount(): Flow<Int> = photoDao.observeCount()
+  fun observeCount(projectId: String): Flow<Int> = photoDao.observeCount(projectId)
   fun observeFolders(): Flow<List<String>> = photoDao.observeFolders()
+  fun observeFolders(projectId: String): Flow<List<String>> = photoDao.observeFolders(projectId)
 
   suspend fun setRating(id: String, rating: Int) {
     require(rating in 0..5)

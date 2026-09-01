@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.stxr.lenscull.domain.CullFlag
 import com.stxr.lenscull.domain.PhotoFormat
 import com.stxr.lenscull.domain.PreviewState
+import com.stxr.lenscull.domain.ProjectSourceType
 import com.stxr.lenscull.domain.RatingSyncState
 
 class Converters {
@@ -15,4 +16,6 @@ class Converters {
   @TypeConverter fun syncState(value: String): RatingSyncState = RatingSyncState.valueOf(value)
   @TypeConverter fun previewState(value: PreviewState): String = value.name
   @TypeConverter fun previewState(value: String): PreviewState = PreviewState.valueOf(value)
+  @TypeConverter fun projectSource(value: ProjectSourceType): String = value.name
+  @TypeConverter fun projectSource(value: String): ProjectSourceType = ProjectSourceType.valueOf(value)
 }

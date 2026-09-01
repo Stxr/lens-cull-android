@@ -22,6 +22,7 @@ import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Map
 import androidx.compose.material.icons.rounded.SyncProblem
 import androidx.compose.material.icons.rounded.TaskAlt
@@ -87,6 +88,7 @@ fun PhotoPreviewPanel(
   }
   var showExif by remember(photo.id) { mutableStateOf(false) }
   var showInfoSheet by remember(photo.id) { mutableStateOf(false) }
+  var showFullscreen by remember { mutableStateOf(false) }
   val holdModifier = Modifier.pointerInput(photo.id) {
     awaitEachGesture {
       val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -131,6 +133,7 @@ fun PhotoPreviewPanel(
           TextButton(onClick = onRetrySync) { Text("重试同步", color = Color(0xFFFFC857)) }
         }
       }
+      IconButton(onClick = { showFullscreen = true }) { Icon(Icons.Rounded.Fullscreen, "全屏预览", tint = Color.White) }
       IconButton(onClick = { showInfoSheet = true }) { Icon(Icons.Rounded.Info, "完整 EXIF", tint = Color.White) }
     }
     Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -211,6 +214,16 @@ fun PhotoPreviewPanel(
 
   if (showInfoSheet) {
     ExifInfoSheet(photo = photo, onDismiss = { showInfoSheet = false })
+  }
+  if (showFullscreen) {
+    FullscreenPhotoViewer(
+      photo = photo,
+      previewFile = previewFile,
+      onRating = onRating,
+      onPrevious = onPrevious,
+      onNext = onNext,
+      onDismiss = { showFullscreen = false },
+    )
   }
 }
 

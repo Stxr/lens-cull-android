@@ -28,6 +28,17 @@ enum class SortField { CAPTURED_AT, FILE_NAME, RATING }
 
 enum class SortDirection { ASCENDING, DESCENDING }
 
+enum class ProjectSourceType { UNCONFIGURED, ALL_STORAGE, DIRECTORY }
+
+data class CullProject(
+  val id: String,
+  val name: String,
+  val sourceType: ProjectSourceType,
+  val sourcePath: String?,
+  val createdAt: Long,
+  val updatedAt: Long,
+)
+
 data class LibraryFilter(
   val formats: Set<PhotoFormat> = PhotoFormat.entries.toSet(),
   val ratingMode: RatingMode = RatingMode.ALL,

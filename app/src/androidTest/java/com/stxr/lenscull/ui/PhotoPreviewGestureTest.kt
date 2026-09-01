@@ -2,9 +2,17 @@ package com.stxr.lenscull.ui
 
 import android.graphics.Bitmap
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onLast
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.test.swipeRight
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -76,6 +84,53 @@ class PhotoPreviewGestureTest {
     composeRule.runOnIdle { assertEquals(1, nextCount) }
     preview.performTouchInput { swipeRight() }
     composeRule.runOnIdle { assertEquals(1, previousCount) }
+    image.delete()
+  }
+
+  @Test fun fullscreenPreviewTogglesRatingMenuAndSupportsSwipe() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val image = File(context.cacheDir, "fullscreen-navigation.jpg")
+    val bitmap = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+    try {
+      image.outputStream().use { output -> check(bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)) }
+    } finally {
+      bitmap.recycle()
+    }
+    val photo = PhotoAsset(
+      id = "test:${image.absolutePath}", volumeName = "test", canonicalPath = image.absolutePath,
+      displayName = image.name, parentPath = image.parent.orEmpty(), format = PhotoFormat.JPEG,
+      mimeType = "image/jpeg", fileSizeBytes = image.length(), modifiedAt = image.lastModified(),
+      capturedAt = null, rating = 0, flag = CullFlag.UNFLAGGED,
+      ratingSyncState = RatingSyncState.LOCAL_ONLY, previewState = PreviewState.READY,
+      previewError = null, exif = ExifSummary(),
+    )
+    var previousCount = 0
+    var nextCount = 0
+    var selectedRating = -1
+    composeRule.setContent {
+      MaterialTheme {
+        PhotoPreviewPanel(
+          photo, { Result.success(image) }, { selectedRating = it }, {}, {}, null,
+          { previousCount++ }, { nextCount++ },
+        )
+      }
+    }
+
+    composeRule.onNodeWithContentDescription("全屏预览").performClick()
+    composeRule.onNodeWithContentDescription("退出全屏").assertIsDisplayed()
+    val fullscreen = composeRule.onNodeWithContentDescription("全屏 ${image.name}")
+    fullscreen.performTouchInput { click() }
+    composeRule.onNodeWithText("再次点击照片可隐藏评分菜单").assertIsDisplayed()
+    composeRule.onAllNodesWithContentDescription("3 星").onLast().performClick()
+    composeRule.runOnIdle { assertEquals(3, selectedRating) }
+    fullscreen.performTouchInput { click() }
+    composeRule.onAllNodesWithText("再次点击照片可隐藏评分菜单").assertCountEquals(0)
+    fullscreen.performTouchInput { swipeLeft() }
+    fullscreen.performTouchInput { swipeRight() }
+    composeRule.runOnIdle {
+      assertEquals(1, nextCount)
+      assertEquals(1, previousCount)
+    }
     image.delete()
   }
 }

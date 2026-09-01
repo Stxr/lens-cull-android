@@ -23,9 +23,12 @@ class ScanWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
       return Result.failure(Data.Builder().putString(KEY_ERROR, "需要管理所有文件权限").build())
     }
     setForeground(foregroundInfo(ScanProgress(0, 0, 0)))
+    val projectId = inputData.getString(KEY_PROJECT_ID)
+      ?: return Result.failure(Data.Builder().putString(KEY_ERROR, "缺少项目").build())
+    val sourcePath = inputData.getString(KEY_SOURCE_PATH)
     val scanner = (applicationContext as LensCullApplication).container.storageScanner
     return try {
-      val result = scanner.scan { progress ->
+      val result = scanner.scan(projectId, sourcePath) { progress ->
         setProgress(progress.toData())
         setForeground(foregroundInfo(progress))
       }
@@ -58,21 +61,28 @@ class ScanWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
   }
 
   companion object {
-    const val UNIQUE_WORK = "lenscull-photo-scan"
+    const val UNIQUE_WORK_PREFIX = "lenscull-photo-scan"
     const val KEY_SCANNED = "scanned"
     const val KEY_INDEXED = "indexed"
     const val KEY_FAILURES = "failures"
     const val KEY_ERROR = "error"
+    const val KEY_PROJECT_ID = "projectId"
+    const val KEY_SOURCE_PATH = "sourcePath"
     private const val CHANNEL_ID = "lenscull_scan"
     private const val NOTIFICATION_ID = 4101
 
-    fun enqueue(context: Context) {
-      val request = OneTimeWorkRequestBuilder<ScanWorker>().addTag(UNIQUE_WORK).build()
-      WorkManager.getInstance(context).enqueueUniqueWork(UNIQUE_WORK, ExistingWorkPolicy.REPLACE, request)
+    fun uniqueWork(projectId: String) = "$UNIQUE_WORK_PREFIX-$projectId"
+
+    fun enqueue(context: Context, projectId: String, sourcePath: String?) {
+      val data = Data.Builder().putString(KEY_PROJECT_ID, projectId).apply {
+        if (sourcePath != null) putString(KEY_SOURCE_PATH, sourcePath)
+      }.build()
+      val request = OneTimeWorkRequestBuilder<ScanWorker>().setInputData(data).addTag(uniqueWork(projectId)).build()
+      WorkManager.getInstance(context).enqueueUniqueWork(uniqueWork(projectId), ExistingWorkPolicy.REPLACE, request)
     }
 
-    fun cancel(context: Context) {
-      WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK)
+    fun cancel(context: Context, projectId: String) {
+      WorkManager.getInstance(context).cancelUniqueWork(uniqueWork(projectId))
     }
 
     private fun ScanProgress.toData(): Data = Data.Builder()

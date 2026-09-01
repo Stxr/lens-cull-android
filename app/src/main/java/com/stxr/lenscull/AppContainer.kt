@@ -2,6 +2,7 @@ package com.stxr.lenscull
 
 import android.content.Context
 import com.stxr.lenscull.data.PhotoCatalogRepository
+import com.stxr.lenscull.data.ProjectRepository
 import com.stxr.lenscull.data.SettingsRepository
 import com.stxr.lenscull.data.db.LensCullDatabase
 import com.stxr.lenscull.metadata.ExifMetadataReader
@@ -16,5 +17,6 @@ class AppContainer(context: Context) {
   private val rawPreviewExtractor = RawPreviewExtractor(context)
   val settingsRepository = SettingsRepository(context)
   val photoRepository = PhotoCatalogRepository(database.photoDao(), metadataWriter, rawPreviewExtractor)
+  val projectRepository = ProjectRepository(database.projectDao())
   val storageScanner = StorageScanner(context, database.photoDao(), exifMetadataReader)
 }

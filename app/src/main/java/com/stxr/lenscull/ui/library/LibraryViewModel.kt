@@ -13,14 +13,17 @@ import com.stxr.lenscull.LensCullApplication
 import com.stxr.lenscull.backup.CatalogBackupManager
 import com.stxr.lenscull.backup.RestoreResult
 import com.stxr.lenscull.domain.CullFlag
+import com.stxr.lenscull.domain.CullProject
 import com.stxr.lenscull.domain.LibraryFilter
 import com.stxr.lenscull.domain.PhotoAsset
 import com.stxr.lenscull.domain.PhotoFormat
+import com.stxr.lenscull.domain.ProjectSourceType
 import com.stxr.lenscull.domain.RatingMode
 import com.stxr.lenscull.domain.ScanState
 import com.stxr.lenscull.domain.SortDirection
 import com.stxr.lenscull.domain.SortField
 import com.stxr.lenscull.scan.ScanWorker
+import com.stxr.lenscull.scan.StorageLocationResolver
 import java.io.File
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -37,27 +40,45 @@ import kotlinx.coroutines.launch
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
   private val app = application as LensCullApplication
   private val repository = app.container.photoRepository
+  private val projectRepository = app.container.projectRepository
   private val backupManager = CatalogBackupManager(application.contentResolver, app.container.database.photoDao(), repository)
   private val workManager = WorkManager.getInstance(application)
   private val settingsRepository = app.container.settingsRepository
 
   val filter = MutableStateFlow(LibraryFilter())
+  private val activeProjectId = MutableStateFlow<String?>(null)
   private val selectedId = MutableStateFlow<String?>(null)
   private val permissionRefresh = MutableStateFlow(0)
   private val operationMessage = MutableStateFlow<String?>(null)
   private val pendingRating = MutableStateFlow<Int?>(null)
 
-  val photos: Flow<PagingData<PhotoAsset>> = filter.flatMapLatest(repository::photos).cachedIn(viewModelScope)
+  val projects: StateFlow<List<CullProject>> = projectRepository.observeProjects()
+    .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+  val activeProject: StateFlow<CullProject?> = activeProjectId.flatMapLatest { id ->
+    if (id == null) flowOf(null) else projectRepository.observeProject(id)
+  }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+  val photos: Flow<PagingData<PhotoAsset>> = combine(activeProjectId, filter) { projectId, currentFilter ->
+    projectId to currentFilter
+  }.flatMapLatest { (projectId, currentFilter) ->
+    if (projectId == null) flowOf(PagingData.empty()) else repository.photos(projectId, currentFilter)
+  }.cachedIn(viewModelScope)
   val selectedPhoto: StateFlow<PhotoAsset?> = selectedId.flatMapLatest { id ->
     if (id == null) flowOf(null) else repository.observePhoto(id)
   }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-  val photoCount: StateFlow<Int> = repository.observeCount()
+  val photoCount: StateFlow<Int> = activeProjectId.flatMapLatest { id ->
+    if (id == null) flowOf(0) else repository.observeCount(id)
+  }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
-  val folders: StateFlow<List<String>> = repository.observeFolders()
+  val folders: StateFlow<List<String>> = activeProjectId.flatMapLatest { id ->
+    if (id == null) flowOf(emptyList()) else repository.observeFolders(id)
+  }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
   val scanState: StateFlow<ScanState> = combine(
-    workManager.getWorkInfosForUniqueWorkFlow(ScanWorker.UNIQUE_WORK),
+    activeProjectId.flatMapLatest { id ->
+      if (id == null) flowOf(emptyList()) else workManager.getWorkInfosForUniqueWorkFlow(ScanWorker.uniqueWork(id))
+    },
     permissionRefresh,
   ) { works, _ ->
     if (!Environment.isExternalStorageManager()) return@combine ScanState.PermissionRequired
@@ -85,9 +106,52 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
   fun refreshPermission() { permissionRefresh.value += 1 }
-  fun startScan() = ScanWorker.enqueue(getApplication())
-  fun cancelScan() = ScanWorker.cancel(getApplication())
+  fun startScan() {
+    val project = activeProject.value ?: return
+    if (project.sourceType == ProjectSourceType.UNCONFIGURED) return
+    ScanWorker.enqueue(getApplication(), project.id, project.sourcePath)
+  }
+  fun cancelScan() { activeProjectId.value?.let { ScanWorker.cancel(getApplication(), it) } }
   fun select(photo: PhotoAsset?) { selectedId.value = photo?.id }
+
+  fun openProject(project: CullProject) {
+    selectedId.value = null
+    filter.value = LibraryFilter()
+    activeProjectId.value = project.id
+  }
+
+  fun closeProject() {
+    selectedId.value = null
+    activeProjectId.value = null
+  }
+
+  fun createProject(name: String) = viewModelScope.launch {
+    val project = projectRepository.create(name)
+    openProject(project)
+  }
+
+  fun deleteProject(project: CullProject) = viewModelScope.launch {
+    if (activeProjectId.value == project.id) closeProject()
+    projectRepository.delete(project.id)
+  }
+
+  fun configureAllStorage() = viewModelScope.launch {
+    val id = activeProjectId.value ?: return@launch
+    projectRepository.configure(id, ProjectSourceType.ALL_STORAGE, null)
+  }
+
+  fun configureDirectory(uri: Uri) {
+    val context = getApplication<Application>()
+    val path = runCatching { StorageLocationResolver.resolveTree(context, uri) }.getOrNull()
+    if (path == null) {
+      operationMessage.value = "无法解析所选目录，请选择内部存储或已挂载存储卡中的目录"
+      return
+    }
+    viewModelScope.launch {
+      val id = activeProjectId.value ?: return@launch
+      projectRepository.configure(id, ProjectSourceType.DIRECTORY, path)
+    }
+  }
 
   fun setRating(rating: Int) {
     val id = selectedId.value ?: return

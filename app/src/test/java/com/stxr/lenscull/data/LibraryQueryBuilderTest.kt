@@ -13,6 +13,7 @@ import org.junit.Test
 class LibraryQueryBuilderTest {
   @Test fun `builds parameterized compound filter`() {
     val query = LibraryQueryBuilder.build(
+      "project-1",
       LibraryFilter(
         formats = setOf(PhotoFormat.JPEG, PhotoFormat.RW2),
         ratingMode = RatingMode.AT_LEAST,
@@ -26,7 +27,8 @@ class LibraryQueryBuilderTest {
     assertTrue(query.sql.contains("format IN (?, ?)"))
     assertTrue(query.sql.contains("rating >= ?"))
     assertTrue(query.sql.contains("ORDER BY rating ASC"))
-    assertEquals(6, query.argCount)
+    assertEquals(7, query.argCount)
+    assertTrue(query.sql.contains("project_photos.projectId = ?"))
     assertTrue(query.sql.contains("parentPath = ? OR parentPath LIKE ?"))
   }
 }

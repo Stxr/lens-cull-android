@@ -8,9 +8,9 @@ import com.stxr.lenscull.domain.SortDirection
 import com.stxr.lenscull.domain.SortField
 
 object LibraryQueryBuilder {
-  fun build(filter: LibraryFilter): SupportSQLiteQuery {
-    val where = mutableListOf<String>()
-    val arguments = mutableListOf<Any>()
+  fun build(projectId: String, filter: LibraryFilter): SupportSQLiteQuery {
+    val where = mutableListOf("project_photos.projectId = ?")
+    val arguments = mutableListOf<Any>(projectId)
 
     if (filter.formats.isEmpty()) {
       where += "0"
@@ -52,7 +52,7 @@ object LibraryQueryBuilder {
     }
     val direction = if (filter.sortDirection == SortDirection.ASCENDING) "ASC" else "DESC"
     val sql = buildString {
-      append("SELECT * FROM photos")
+      append("SELECT photos.* FROM photos INNER JOIN project_photos ON photos.id = project_photos.photoId")
       if (where.isNotEmpty()) append(" WHERE ${where.joinToString(" AND ")}")
       append(" ORDER BY $orderColumn $direction, canonicalPath ASC")
     }
