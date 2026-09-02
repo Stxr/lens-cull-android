@@ -62,13 +62,15 @@ class PhotoPreviewGestureTest {
       previewError = null,
       exif = ExifSummary(),
     )
+    val nextPhoto = photo.copy(id = "test:preview-next", displayName = "swipe-next.jpg")
+    val displayedPhoto = mutableStateOf(photo)
     var previousCount = 0
     var nextCount = 0
 
     composeRule.setContent {
       MaterialTheme {
         PhotoPreviewPanel(
-          photo = photo,
+          photo = displayedPhoto.value,
           previewFile = { Result.success(image) },
           onRating = {},
           onFlag = {},
@@ -76,14 +78,21 @@ class PhotoPreviewGestureTest {
           onBack = null,
           onPrevious = { previousCount++ },
           onNext = { nextCount++ },
+          previewPhotos = listOf(photo, nextPhoto),
+          onPhotoSelect = { selected ->
+            if (selected.id == nextPhoto.id) nextCount++ else previousCount++
+            displayedPhoto.value = selected
+          },
         )
       }
     }
 
     val preview = composeRule.onNodeWithContentDescription(image.name)
     preview.performTouchInput { swipeLeft() }
+    composeRule.onNodeWithContentDescription(nextPhoto.displayName).assertIsDisplayed()
     composeRule.runOnIdle { assertEquals(1, nextCount) }
-    preview.performTouchInput { swipeRight() }
+    composeRule.onNodeWithContentDescription(nextPhoto.displayName).performTouchInput { swipeRight() }
+    composeRule.onNodeWithContentDescription(photo.displayName).assertIsDisplayed()
     composeRule.runOnIdle { assertEquals(1, previousCount) }
     image.delete()
   }
@@ -122,8 +131,8 @@ class PhotoPreviewGestureTest {
             nextCount++
             displayedPhoto.value = nextPhoto
           },
-          fullscreenPhotos = listOf(photo, nextPhoto),
-          onFullscreenSelect = { selected ->
+          previewPhotos = listOf(photo, nextPhoto),
+          onPhotoSelect = { selected ->
             if (selected.id == nextPhoto.id) nextCount++ else previousCount++
             displayedPhoto.value = selected
           },

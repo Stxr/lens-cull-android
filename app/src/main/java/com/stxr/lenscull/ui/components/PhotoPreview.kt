@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -39,12 +41,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -62,6 +67,8 @@ import com.stxr.lenscull.domain.PhotoAsset
 import com.stxr.lenscull.domain.RatingSyncState
 import com.stxr.lenscull.metadata.ExifDisplayFormatter
 import java.io.File
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -75,8 +82,8 @@ fun PhotoPreviewPanel(
   onBack: (() -> Unit)?,
   onPrevious: () -> Unit,
   onNext: () -> Unit,
-  fullscreenPhotos: List<PhotoAsset> = listOfNotNull(photo),
-  onFullscreenSelect: ((PhotoAsset) -> Unit)? = null,
+  previewPhotos: List<PhotoAsset> = listOfNotNull(photo),
+  onPhotoSelect: ((PhotoAsset) -> Unit)? = null,
   modifier: Modifier = Modifier,
 ) {
   if (photo == null) {
@@ -85,33 +92,38 @@ fun PhotoPreviewPanel(
     }
     return
   }
-  val preview by produceState<Result<File>?>(null, photo.id, photo.modifiedAt) {
-    value = previewFile(photo)
+  val pagerPhotos = remember(previewPhotos, photo.id) {
+    if (previewPhotos.any { it.id == photo.id }) previewPhotos else listOf(photo)
   }
-  var showExif by remember(photo.id) { mutableStateOf(false) }
+  val initialPage = pagerPhotos.indexOfFirst { it.id == photo.id }.coerceAtLeast(0)
+  val pagerState = rememberPagerState(initialPage = initialPage) { pagerPhotos.size }
+  val selectedId by rememberUpdatedState(photo.id)
+  val currentSelectionHandler by rememberUpdatedState<(PhotoAsset) -> Unit> { selected ->
+    if (onPhotoSelect != null) {
+      onPhotoSelect(selected)
+    } else {
+      val currentIndex = pagerPhotos.indexOfFirst { it.id == selectedId }
+      val selectedIndex = pagerPhotos.indexOfFirst { it.id == selected.id }
+      if (selectedIndex < currentIndex) onPrevious() else if (selectedIndex > currentIndex) onNext()
+    }
+  }
+  val pagerScope = rememberCoroutineScope()
   var showInfoSheet by remember(photo.id) { mutableStateOf(false) }
   var showFullscreen by remember { mutableStateOf(false) }
-  val holdModifier = Modifier.pointerInput(photo.id) {
-    awaitEachGesture {
-      val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-      val endedBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-        while (true) {
-          val event = awaitPointerEvent(PointerEventPass.Initial)
-          val pointer = event.changes.firstOrNull { it.id == down.id }
-          if (pointer?.pressed != true ||
-            (pointer.position - down.position).getDistance() > viewConfiguration.touchSlop
-          ) {
-            return@withTimeoutOrNull true
-          }
-        }
+
+  LaunchedEffect(pagerState, pagerPhotos) {
+    snapshotFlow { pagerState.settledPage }
+      .distinctUntilChanged()
+      .collect { page ->
+        val selected = pagerPhotos.getOrNull(page)
+        if (selected != null && selected.id != selectedId) currentSelectionHandler(selected)
       }
-      if (endedBeforeLongPress == null) {
-        showExif = true
-        do {
-          val event = awaitPointerEvent(PointerEventPass.Initial)
-        } while (event.changes.any { it.pressed })
-        showExif = false
-      }
+  }
+
+  LaunchedEffect(photo.id, pagerPhotos) {
+    val targetPage = pagerPhotos.indexOfFirst { it.id == photo.id }
+    if (targetPage >= 0 && targetPage != pagerState.currentPage && !pagerState.isScrollInProgress) {
+      pagerState.scrollToPage(targetPage)
     }
   }
 
@@ -139,57 +151,32 @@ fun PhotoPreviewPanel(
       IconButton(onClick = { showInfoSheet = true }) { Icon(Icons.Rounded.Info, "完整 EXIF", tint = Color.White) }
     }
     Box(Modifier.weight(1f).fillMaxWidth()) {
-      when {
-        preview == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
-        preview!!.isSuccess -> key(photo.id) {
-          val zoomState = rememberCoilZoomState()
-          val swipeModifier = Modifier.pointerInput(photo.id, zoomState) {
-            awaitEachGesture {
-              val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-              val startedAtBaseScale = zoomState.zoomable.userTransform.scaleX <= BASE_SCALE_TOLERANCE
-              var lastPosition = down.position
-              var multiplePointers = false
-              do {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                multiplePointers = multiplePointers || event.changes.count { it.pressed } > 1
-                val pointer = event.changes.firstOrNull { it.id == down.id }
-                if (pointer != null) lastPosition = pointer.position
-              } while (pointer?.pressed == true)
-
-              when (
-                detectPhotoSwipe(
-                  deltaX = lastPosition.x - down.position.x,
-                  deltaY = lastPosition.y - down.position.y,
-                  viewportWidthPx = size.width.toFloat(),
-                  touchSlopPx = viewConfiguration.touchSlop,
-                  enabled = startedAtBaseScale && !multiplePointers,
-                )
-              ) {
-                PhotoSwipeDirection.PREVIOUS -> onPrevious()
-                PhotoSwipeDirection.NEXT -> onNext()
-                null -> Unit
-              }
-            }
-          }
-          CoilZoomAsyncImage(
-            model = preview!!.getOrNull(),
-            contentDescription = photo.displayName,
-            modifier = Modifier.fillMaxSize().then(holdModifier).then(swipeModifier),
-            zoomState = zoomState,
-          )
-        }
-        else -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
-          Icon(Icons.Rounded.Close, null, Modifier.size(44.dp), tint = Color(0xFFFF8A80))
-          Text(preview!!.exceptionOrNull()?.message ?: "无法预览", color = Color.White, modifier = Modifier.padding(12.dp))
-        }
+      HorizontalPager(
+        state = pagerState,
+        modifier = Modifier.fillMaxSize(),
+        beyondViewportPageCount = 1,
+        key = { pagerPhotos[it].id },
+      ) { page ->
+        PreviewPhotoPage(photo = pagerPhotos[page], previewFile = previewFile)
       }
-      IconButton(onClick = onPrevious, modifier = Modifier.align(Alignment.CenterStart)) {
+      IconButton(
+        onClick = {
+          val target = (pagerState.currentPage - 1).coerceAtLeast(0)
+          if (target != pagerState.currentPage) pagerScope.launch { pagerState.animateScrollToPage(target) }
+        },
+        modifier = Modifier.align(Alignment.CenterStart),
+      ) {
         Icon(Icons.Rounded.ChevronLeft, "上一张", Modifier.size(42.dp), tint = Color.White)
       }
-      IconButton(onClick = onNext, modifier = Modifier.align(Alignment.CenterEnd)) {
+      IconButton(
+        onClick = {
+          val target = (pagerState.currentPage + 1).coerceAtMost(pagerPhotos.lastIndex)
+          if (target != pagerState.currentPage) pagerScope.launch { pagerState.animateScrollToPage(target) }
+        },
+        modifier = Modifier.align(Alignment.CenterEnd),
+      ) {
         Icon(Icons.Rounded.ChevronRight, "下一张", Modifier.size(42.dp), tint = Color.White)
       }
-      if (showExif) ExifOverlay(photo, Modifier.align(Alignment.BottomEnd).padding(16.dp))
     }
     Surface(color = Color(0xFF181B20), contentColor = Color.White) {
       Row(
@@ -220,20 +207,64 @@ fun PhotoPreviewPanel(
   if (showFullscreen) {
     FullscreenPhotoViewer(
       photo = photo,
-      photos = fullscreenPhotos,
+      photos = previewPhotos,
       previewFile = previewFile,
       onRating = onRating,
-      onSelect = { selected ->
-        if (onFullscreenSelect != null) {
-          onFullscreenSelect(selected)
-        } else {
-          val currentIndex = fullscreenPhotos.indexOfFirst { it.id == photo.id }
-          val selectedIndex = fullscreenPhotos.indexOfFirst { it.id == selected.id }
-          if (selectedIndex < currentIndex) onPrevious() else if (selectedIndex > currentIndex) onNext()
-        }
-      },
+      onSelect = currentSelectionHandler,
       onDismiss = { showFullscreen = false },
     )
+  }
+}
+
+@Composable
+private fun PreviewPhotoPage(
+  photo: PhotoAsset,
+  previewFile: suspend (PhotoAsset) -> Result<File>,
+) {
+  val preview by produceState<Result<File>?>(null, photo.id, photo.modifiedAt) { value = previewFile(photo) }
+  var showExif by remember(photo.id) { mutableStateOf(false) }
+  val holdModifier = Modifier.pointerInput(photo.id) {
+    awaitEachGesture {
+      val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+      val endedBeforeLongPress = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+        while (true) {
+          val event = awaitPointerEvent(PointerEventPass.Initial)
+          val pointer = event.changes.firstOrNull { it.id == down.id }
+          if (pointer?.pressed != true ||
+            (pointer.position - down.position).getDistance() > viewConfiguration.touchSlop
+          ) {
+            return@withTimeoutOrNull true
+          }
+        }
+      }
+      if (endedBeforeLongPress == null) {
+        showExif = true
+        do {
+          val event = awaitPointerEvent(PointerEventPass.Initial)
+        } while (event.changes.any { it.pressed })
+        showExif = false
+      }
+    }
+  }
+
+  Box(Modifier.fillMaxSize()) {
+    when {
+      preview == null -> CircularProgressIndicator(Modifier.align(Alignment.Center), color = Color.White)
+      preview!!.isSuccess -> {
+        val zoomState = rememberCoilZoomState()
+        CoilZoomAsyncImage(
+          model = preview!!.getOrNull(),
+          contentDescription = photo.displayName,
+          modifier = Modifier.fillMaxSize().then(holdModifier),
+          zoomState = zoomState,
+        )
+      }
+      else -> Column(Modifier.align(Alignment.Center), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Rounded.Close, null, Modifier.size(44.dp), tint = Color(0xFFFF8A80))
+        Text(preview!!.exceptionOrNull()?.message ?: "无法预览", color = Color.White, modifier = Modifier.padding(12.dp))
+      }
+    }
+    if (showExif) ExifOverlay(photo, Modifier.align(Alignment.BottomEnd).padding(16.dp))
   }
 }
 
